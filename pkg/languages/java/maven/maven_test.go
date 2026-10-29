@@ -2704,3 +2704,45 @@ func TestPatchProject_UndeclaredDepEmitsNoImportScope(t *testing.T) {
 		t.Errorf("emitted POM is missing the appended dependency:\n%s", xmlBytes)
 	}
 }
+
+// TestConvertDependenciesToPatches_NoImportScopeOnProductionPath covers the path
+// Update actually takes. The constants are only consulted by parsePatches, which
+// nothing in production calls, so convertDependenciesToPatches hardcoding
+// scope=import/type=jar meant a bare dependency still reached PatchProject with
+// an import-scoped jar entry.
+func TestConvertDependenciesToPatches_NoImportScopeOnProductionPath(t *testing.T) {
+	deps := []languages.Dependency{{
+		Name:    "ognl:ognl",
+		Version: "3.4.13",
+		// Scope and Type deliberately unset, as a bare group@artifact@version gives.
+	}}
+
+	patches, err := convertDependenciesToPatches(deps)
+	if err != nil {
+		t.Fatalf("convertDependenciesToPatches: %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("got %d patches, want 1", len(patches))
+	}
+	if patches[0].Scope == "import" {
+		t.Errorf("patch scope defaulted to import; scope=import is only valid on type=pom")
+	}
+
+	// And confirm it does not reach the emitted POM.
+	project := &gopom.Project{
+		DependencyManagement: &gopom.DependencyManagement{
+			Dependencies: &[]gopom.Dependency{makeDep("org.mybatis", "mybatis", "3.5.19")},
+		},
+	}
+	got, err := PatchProject(context.Background(), project, patches, nil)
+	if err != nil {
+		t.Fatalf("PatchProject: %v", err)
+	}
+	xmlBytes, err := got.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(xmlBytes), "<scope>import</scope>") {
+		t.Errorf("emitted POM contains <scope>import</scope> for an undeclared jar dependency:\n%s", xmlBytes)
+	}
+}
